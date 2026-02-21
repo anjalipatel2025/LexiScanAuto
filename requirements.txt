@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 python-multipart
-pytesseract
-pdf2image
+pymupdf
 spacy
 pillow
 numpy
+pandas
