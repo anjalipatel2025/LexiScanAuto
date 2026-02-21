@@ -1,5 +1,6 @@
 import os
 import shutil
+import json
 import uuid
 from typing import List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -18,7 +19,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Initialize engines on startup
 try:
     logger.info("Initializing OCR components...")
     ocr_processor = OCRProcessor()
@@ -51,10 +51,7 @@ def health_check():
 
 @app.post("/api/v1/extract", response_model=ExtractionResponse)
 async def extract_document(file: UploadFile = File(...)):
-    """
-    Production endpoint to upload a FinTech PDF contract, extract clean text via PyMuPDF OCR, 
-    and identify structured financial Named Entities using SpaCy.
-    """
+   
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Invalid file type. Only PDFs are supported.")
         
@@ -66,22 +63,36 @@ async def extract_document(file: UploadFile = File(...)):
     temp_path = os.path.join("data", "raw", f"temp_{doc_id}.pdf")
     
     try:
-        # Write streaming upload to disk temporarily for the OCR engine
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
         logger.info(f"Processing uploaded document: {file.filename} (ID: {doc_id})")
         
-        # 1. OCR Extraction pipeline
         clean_text, metrics = ocr_processor.process_pdf(temp_path)
         
         if metrics["noise_ratio"] > 0.5:
              logger.warning(f"High noise ratio detected ({metrics['noise_ratio']}) in Document ID {doc_id}.")
         
-        # 2. NER Extraction pipeline
         entities = ner_engine.extract_entities(clean_text)
         
         logger.info(f"Successfully processed {file.filename}. Found {len(entities)} entities.")
+        
+        # 3. Auto-save output to data/annotations so the user can review it in Doccano!
+        os.makedirs("data/annotations", exist_ok=True)
+        annotation_path = os.path.join("data", "annotations", f"{file.filename}.jsonl")
+        doccano_labels = [[ent["start_char"], ent["end_char"], ent["entity"]] for ent in entities]
+        
+        with open(annotation_path, "a", encoding="utf-8") as f:
+            record = {
+                "document_id": doc_id,
+                "text": clean_text,
+                "label": doccano_labels,
+                "ocr_noise_ratio": metrics["noise_ratio"],
+                "text_length": metrics["text_length"]
+            }
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            
+        logger.info(f"Saved pre-annotated output to {annotation_path}")
         
         return ExtractionResponse(
             document_id=doc_id,
@@ -97,7 +108,6 @@ async def extract_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error executing pipeline: {str(e)}")
         
     finally:
-        # Safely cleanup the temp file to keep production storage clean
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
