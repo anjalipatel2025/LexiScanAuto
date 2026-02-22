@@ -7,6 +7,9 @@ import spacy
 from spacy.training import Example, offsets_to_biluo_tags
 from spacy.util import minibatch, compounding
 
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from utils.logger import configure_logger
 
 logger = configure_logger("LexiScanAuto.NER.Train")
@@ -47,7 +50,7 @@ def get_train_val_split(annotations_dir):
         
     random.seed(42)
     random.shuffle(all_data)
-    split_idx = int(len(all_data) * 0.8)
+    split_idx = max(1, int(len(all_data) * 0.8))
     
     return all_data[:split_idx], all_data[split_idx:]
 
@@ -60,21 +63,19 @@ def validate_and_format_data(nlp, data):
     for text, annotations in data:
         doc = nlp.make_doc(text)
         entities = annotations.get("entities", [])
+        valid_entities = []
         
-        # Validate offsets
-        tags = offsets_to_biluo_tags(doc, entities)
-        
-        if "-" in tags:
-            # logger.warning(f"Skipping sample due to misaligned entities")
-            skipped += 1
-            continue
+        for start, end, label in entities:
+            span = doc.char_span(start, end, label=label, alignment_mode="contract")
+            if span is not None:
+                valid_entities.append((span.start_char, span.end_char, label))
+                entity_counts[label] = entity_counts.get(label, 0) + 1
+            else:
+                skipped += 1
+                
+        if valid_entities:
+            valid_data.append((text, {"entities": valid_entities}))
             
-        for ent in entities:
-            label = ent[2]
-            entity_counts[label] = entity_counts.get(label, 0) + 1
-            
-        valid_data.append((text, annotations))
-        
     return valid_data, skipped, entity_counts
 
 
@@ -107,7 +108,7 @@ def train_ner(train_data, val_data, model_dir, n_iter=30):
 
     # Add all unique labels from our dataset
     for _, annotations in clean_train_data:
-        for ent in annotations.get("entities"):
+        for ent in annotations.get("entities", []):
             ner.add_label(ent[2])
 
     pipe_exceptions = ["ner", "trf_wordpiecer", "trf_tok2vec"]

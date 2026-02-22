@@ -3,6 +3,9 @@ from pathlib import Path
 import spacy
 from spacy.training import Example
 
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from utils.logger import configure_logger
 from ner.train import get_train_val_split, validate_and_format_data
 
