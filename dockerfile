@@ -3,23 +3,28 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-# Include poppler-utils if you ever revert to pdf2image
+# Install system dependencies (Tesseract OCR, Poppler for pdf2image, build tools)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements and install python dependencies
 COPY requirements.txt .
-
-# Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
+# Download a small SpaCy english model to be used as a base if necessary
+RUN python -m spacy download en_core_web_sm
+
+# Copy the entire project code into the container
 COPY . .
 
-# Expose production port
+# Expose FastAPI production port
 EXPOSE 8000
 
-# Run the FastAPI server in production mode
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Set Python path to ensure imports work correctly
+ENV PYTHONPATH="/app"
+
+# Start the uvicorn server serving the main FastAPI application
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
